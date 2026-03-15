@@ -1,0 +1,31 @@
+{
+  "name": "claude-skill-validator",
+  "version": "1.0.0",
+  "description": "Validate and repair Claude Code skills — detect broken references, deprecated tools, syntax errors, and auto-fix issues",
+  "type": "module",
+  "bin": {
+    "claude-skill-validator": "./skill-validator.mjs"
+  },
+  "files": [
+    "skill-validator.mjs",
+    "README.md",
+    "README.ja.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aliksir/skill-validator.git"
+  },
+  "keywords": [
+    "claude-code",
+    "skill",
+    "validator",
+    "cli",
+    "mcp"
+  ],
+  "author": "aliksir",
+  "license": "MIT"
+}
