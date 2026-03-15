@@ -16,7 +16,7 @@
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { resolve, join, extname, basename, dirname } from 'path';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import { homedir } from 'os';
 
 // --- CLI引数パース ---
@@ -35,6 +35,26 @@ const updateCheck = hasFlag('--update-check');
 const verbose = hasFlag('--verbose');
 const fixMode = hasFlag('--fix');
 const dryRun = hasFlag('--dry-run');
+
+// --- --help ---
+if (hasFlag('--help') || hasFlag('-h')) {
+  console.log(`claude-skill-validator — Validate and repair Claude Code skills
+
+Usage: claude-skill-validator [options]
+
+Options:
+  --dir <path>       Claude config directory (default: ~/.claude)
+  --skills-only      Scan skills/ only
+  --commands-only    Scan commands/ only
+  --json             JSON output
+  --verbose          Show all checks (including PASS)
+  --update-check     Check for updates from source repositories
+  --fix              Auto-fix fixable issues (with backup)
+  --dry-run          Preview fixes without applying
+  --help, -h         Show this help message
+`);
+  process.exit(0);
+}
 
 // --- 結果収集 ---
 const results = [];
@@ -123,9 +143,7 @@ function checkSyntax(filePath) {
       return { ok: true };
     }
     if (ext === '.py') {
-      // Windows パス対策: バックスラッシュをフォワードスラッシュに変換
-      const safePath = filePath.replace(/\\/g, '/');
-      execSync(`python -c "import py_compile; py_compile.compile(r'${safePath}', doraise=True)"`, { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
+      execFileSync('python', ['-c', `import py_compile; py_compile.compile(${JSON.stringify(filePath)}, doraise=True)`], { timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] });
       return { ok: true };
     }
     if (ext === '.sh' || ext === '.bash') {
@@ -232,6 +250,7 @@ function checkToolReferences(name, content, filePath) {
   ];
 
   for (const { pattern, desc } of mcpReplacements) {
+    pattern.lastIndex = 0;
     if (pattern.test(content)) {
       addResult(name, 'tool-ref', 'FAIL', `廃止されたツール参照: ${desc}`);
 

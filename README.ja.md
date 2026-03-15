@@ -1,6 +1,8 @@
-# skill-validator
+# claude-skill-validator
 
-Claude Code のスキル・コマンドの健全性を一括チェックするCLIツール。
+Claude Code のスキル・コマンドの健全性を一括チェック・自動修復するCLIツール。
+
+[English README](README.md)
 
 環境変更（CLIアップデート、ツール廃止、パス変更等）起因のスキル破損を早期検知する。
 
@@ -19,8 +21,11 @@ Claude Code のスキル・コマンドの健全性を一括チェックするCL
 ## 使い方
 
 ```bash
-# 基本実行（~/.claude をスキャン）
-node skill-validator.mjs
+# npx で実行（インストール不要）
+npx claude-skill-validator
+
+# または基本実行（~/.claude をスキャン）
+claude-skill-validator
 
 # 詳細出力
 node skill-validator.mjs --verbose
@@ -65,6 +70,19 @@ node skill-validator.mjs --dir /path/to/.claude
 | 0 | 問題なし（FAILなし） |
 | 1 | FAILあり（要修正） |
 | 2 | ツール自体のエラー |
+
+## 自動修復
+
+```bash
+# 修正可能な問題を自動修復（バックアップ付き）
+claude-skill-validator --fix
+
+# 修正内容をプレビュー（実際には変更しない）
+claude-skill-validator --dry-run
+```
+
+廃止されたMCPツール参照（`tabs_context_mcp` → `browser-cli snapshot` 等）を自動で置換する。
+修復前に `~/.claude/.skill-validator-backup/` にバックアップを作成する。
 
 ## アップデートチェック
 
