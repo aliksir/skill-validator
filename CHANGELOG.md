@@ -20,6 +20,17 @@ All notable changes to this project will be documented in this file.
 - `isNpx()`: Detects npx execution via `npm_execpath`, `argv[1]`, and `npm list -g` fallback
 - `selfUpdate()`: Orchestrates the self-update flow with pre/post version display
 
+## [1.2.0] - 2026-03-17
+
+### Changed
+- `checkCommandReferences`: チェック対象をコードフェンスブロック（` ```bash/sh/shell/zsh/console ``` `）内のコマンドと `$ ` プレフィックス行のみに限定
+  - インラインバッククォート（`` `word` ``）は完全スキップ — 用語囲みをコマンドと誤検知する最大の原因を排除
+  - パイプ `|` の後のコマンドもコードブロック内から抽出
+  - コードブロック外の `$ command` パターン（ドキュメント内の実行例）は引き続き検出
+- `checkCommandReferences`: `CMD_EXCLUDE` を大幅縮小 — インラインバッククォートを対象外にしたため、数百語の英単語除外リストが不要になり削除
+  - シェル組み込み・構文キーワードのみを除外リストに残す（`for`, `done`, `if`, `fi`, `while`, `case`, `esac` 等）
+- セキュリティスキル（`active-directory-attacks` 等）の bashブロック内 `nmap`/`sqlmap`/`hydra` 等は引き続き検出される
+
 ## [1.1.0] - 2026-03-17
 
 ### Added

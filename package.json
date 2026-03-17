@@ -1,6 +1,6 @@
 {
   "name": "claude-skill-validator",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Validate and repair Claude Code skills — detect broken references, deprecated tools, syntax errors, and auto-fix issues",
   "type": "module",
   "bin": {

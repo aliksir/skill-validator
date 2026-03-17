@@ -619,124 +619,25 @@ function checkToolReferences(name, content, filePath) {
 
 // --- チェック4: コマンド参照検証 ---
 
-// コマンドとして誤検知しやすい単語・シェル組み込みの除外リスト
-// （ループ外に定数として定義してパフォーマンス最適化）
+// シェル組み込みコマンド・構文キーワードの除外リスト
+// インラインバッククォートは対象外にしたため、英単語の大量除外は不要
 const CMD_EXCLUDE = new Set([
   // シェル組み込みコマンド・構文キーワード
-  'done', 'then', 'else', 'elif', 'esac', 'eval', 'exec',
-  'trap', 'wait', 'shift', 'alias', 'unset', 'declare', 'readonly',
-  'typeset', 'getopts', 'source', 'local',
-  // 英語の一般単語（4文字以上）
-  'also', 'each', 'here', 'into', 'just', 'like', 'make', 'many',
-  'most', 'much', 'must', 'name', 'need', 'only', 'over', 'such',
-  'take', 'than', 'that', 'them', 'then', 'this', 'very', 'when',
-  'will', 'with', 'your', 'about', 'after', 'being', 'could', 'every',
-  'first', 'found', 'great', 'never', 'other', 'right', 'shall',
-  'since', 'still', 'their', 'there', 'these', 'thing', 'those',
-  'under', 'using', 'where', 'which', 'while', 'would', 'should',
-  'before', 'between', 'during', 'allows', 'rather', 'string', 'number',
-  'object', 'header', 'module', 'result', 'output', 'input', 'value',
-  'default', 'example', 'defaults', 'decision', 'description', 'markdown',
-  'package', 'email', 'placeholder', 'flag', 'have', 'executes', 'based',
-  'above', 'below', 'inside', 'returns', 'given', 'called', 'ensure',
-  'create', 'check', 'update', 'delete', 'model', 'data', 'file', 'path',
-  'note', 'rule', 'test', 'step', 'list', 'item', 'code', 'line', 'mode',
-  'info', 'warn', 'error', 'pass', 'fail', 'skip', 'next', 'prev',
-  'start', 'stop', 'open', 'close', 'read', 'write', 'send', 'load',
-  'save', 'init', 'main', 'help', 'show', 'hide', 'move', 'copy', 'link',
-  'done', 'use', 'set', 'show',
-  // 誤検知報告済みの英単語
-  'markers', 'section', 'contains', 'accordingly', 'artifact', 'onwards',
-  'annotations', 'complete', 'agent', 'reached', 'folder', 'correctly',
-  'sections', 'parameter', 'http', 'tidy', 'system', 'ignore',
-  'forget', 'pretend', 'goto', 'click', 'fill', 'snapshot', 'screenshot',
-  'implement', 'search', 'exploit',
-  // 言語名（コマンドではない）
-  'csharp', 'rust', 'swift', 'kotlin', 'scala', 'elixir', 'dart',
-  'typescript', 'javascript', 'dockerfile', 'graphql',
-  // プログラミング用語
-  'true', 'false', 'null', 'none', 'text',
-  'config', 'import', 'export', 'const', 'function', 'return',
-  'class', 'async', 'await', 'from', 'type', 'interface', 'enum',
-  'void', 'self', 'super', 'static', 'public', 'private', 'protected',
-  'abstract', 'final', 'override', 'throw', 'catch', 'finally',
-  'break', 'continue', 'switch', 'case', 'yield', 'defer',
-  'struct', 'trait', 'impl', 'match', 'select', 'insert',
-  'define', 'include', 'require', 'template', 'component', 'service',
-  // CSS/HTMLプロパティ
-  'display', 'color', 'width', 'height', 'margin', 'padding', 'border',
-  'content', 'position', 'overflow', 'opacity', 'transition',
-  'prefers-reduced-motion', 'select_related', 'prefetch_related',
-  // フレームワーク/ライブラリ名
-  'react', 'angular', 'django', 'flask', 'express', 'spring',
-  // ペンテストスキル参照
-  'api-fuzzing-bug-bounty', 'scanning-tools', 'truststore', 'certifi',
-  // その他の偽陽性パターン
-  'agents', 'script', 'debug', 'format', 'build', 'deploy', 'lint',
-  'watch', 'clean', 'serve', 'print', 'parse', 'fetch', 'handle',
-  'render', 'mount', 'patch', 'merge', 'reset', 'clear', 'flush',
-  'index', 'count', 'query', 'table', 'field', 'column', 'schema',
-  'token', 'scope', 'state', 'event', 'route', 'proxy', 'cache',
-  'queue', 'stack', 'graph', 'tree', 'worker', 'socket',
-  'stream', 'buffer', 'chunk', 'block', 'layer', 'stage', 'phase',
-  'setup', 'apply', 'abort', 'retry', 'spawn', 'child', 'parent',
-  'local', 'remote', 'source', 'target', 'origin', 'branch', 'commit',
-  'version', 'release', 'stable', 'latest', 'canary', 'verify',
-  'delete', 'xml', 'svg', 'yaml', 'json', 'html', 'css', 'lua',
-  'sql', 'act', 'auto', 'submit', 'closes', 'links', 'review',
-  // ARIA属性（HTMLアクセシビリティ属性はコマンドではない）
-  'aria-expanded', 'aria-label', 'aria-controls', 'aria-selected',
-  'aria-hidden', 'aria-disabled', 'aria-describedby', 'aria-live',
-  'aria-checked', 'aria-pressed', 'aria-required', 'aria-invalid',
-  // 一般的な英単語（追加）
-  'status', 'report', 'enable', 'disable', 'remove', 'filter',
-  'change', 'access', 'button', 'press', 'place', 'enter', 'leave',
-  'valid', 'invalid', 'success', 'failure', 'install', 'uninstall',
-  'active', 'inactive', 'running', 'pending', 'failed', 'paused',
-  'request', 'response', 'message', 'payload', 'callback', 'handler',
-  'prefix', 'suffix', 'pattern', 'regex', 'match', 'replace',
-  'extract', 'convert', 'encode', 'decode', 'compress', 'decompress',
-  'expand', 'collapse', 'toggle', 'switch', 'navigate', 'redirect',
-  'upload', 'download', 'attach', 'detach', 'bind', 'unbind',
-  'register', 'unregister', 'connect', 'disconnect', 'subscribe',
-  'publish', 'emit', 'listen', 'notify', 'alert', 'confirm', 'prompt',
+  'for', 'done', 'then', 'else', 'elif', 'fi', 'if', 'do', 'while',
+  'case', 'esac', 'in', 'eval', 'exec', 'export', 'source', 'local',
+  'declare', 'trap', 'wait', 'shift', 'unset', 'readonly', 'typeset',
+  'getopts', 'alias', 'echo', 'printf', 'test', 'true', 'false',
+  'cd', 'pwd', 'pushd', 'popd', 'dirs', 'bg', 'fg', 'jobs', 'kill',
+  'umask', 'ulimit', 'read', 'builtin', 'command', 'type', 'hash',
+  'enable', 'let', 'shopt', 'return', 'exit',
+  // awk 組み込み
+  'next', 'print', 'printf', 'getline', 'split', 'match', 'index', 'substr', 'gsub', 'gensub',
 ]);
 
 function checkCommandReferences(name, content) {
-  // バッククォート内のコマンドパターンを抽出
-  const codeBlocks = content.match(/`([^`]+)`/g) || [];
   const knownCommands = new Set();
 
-  // 一般的なCLIコマンドやキーワードを除外（関数外で定義してループ内の再生成を避ける）
-  for (const block of codeBlocks) {
-    const cmd = block.replace(/`/g, '').trim().split(/\s/)[0];
-    // コマンドっぽいもの（小文字英字+ハイフンで始まる、4文字以上）
-    // 3文字以下は除外: aws/pip 等は systemCmds で個別カバー済み
-    if (/^[a-z][\w-]*$/.test(cmd) && cmd.length > 3 && cmd.length < 30) {
-      if (!CMD_EXCLUDE.has(cmd)) {
-        knownCommands.add(cmd);
-      }
-    }
-  }
-
-  // 明示的なCLIコマンド参照パターン
-  const cliPatterns = content.match(/(?:^|\n)\s*(?:\$\s+)?([a-z][\w-]+)\s/gm) || [];
-  // bash/shell のコードブロック内のコマンド
-  const shellBlocks = content.match(/```(?:bash|sh|shell)\n([\s\S]*?)```/g) || [];
-  for (const block of shellBlocks) {
-    const lines = block.split('\n').slice(1, -1);
-    for (const line of lines) {
-      const cmd = line.trim().replace(/^\$\s*/, '').split(/\s/)[0];
-      // シェルブロック内も4文字以上に統一（3文字以下は systemCmds でカバー）
-      if (/^[a-z][\w-]+$/.test(cmd) && cmd.length > 3) {
-        if (!CMD_EXCLUDE.has(cmd)) {
-          knownCommands.add(cmd);
-        }
-      }
-    }
-  }
-
-  // 検証対象のコマンド（一般的なシステムコマンドは除外）
+  // 一般的なシステムコマンドは検証対象外
   const systemCmds = new Set([
     'git', 'npm', 'npx', 'node', 'python', 'python3', 'pip', 'bash', 'sh',
     'cat', 'ls', 'cd', 'cp', 'mv', 'rm', 'mkdir', 'echo', 'grep', 'find',
@@ -746,9 +647,71 @@ function checkCommandReferences(name, content) {
     'pytest', 'jest', 'vitest', 'ruff', 'black', 'mypy',
   ]);
 
-  const customCmds = [...knownCommands].filter(c => !systemCmds.has(c));
+  /**
+   * コマンド名を候補セットに追加するヘルパー
+   * - 小文字英字またはハイフンで構成される4文字以上30文字未満の文字列
+   * - CMD_EXCLUDE / systemCmds に含まれるものはスキップ
+   * - アンダースコアを含む識別子（awk変数等）はスキップ
+   * - 変数代入（var=value）はスキップ
+   */
+  function addCmd(raw) {
+    // セミコロン・&&・||・バックグラウンド & で区切られた最初のトークンを取得
+    const segment = raw.trim().replace(/^\$\s*/, '').split(/[\s|;&]/)[0];
+    const cmd = segment.split('=')[0]; // 変数代入 (FOO=bar) を除去
+    if (
+      /^[a-z][a-z0-9-]*$/.test(cmd) && // アンダースコア含む識別子は除外
+      cmd.length > 3 &&
+      cmd.length < 30 &&
+      !CMD_EXCLUDE.has(cmd) &&
+      !systemCmds.has(cmd)
+    ) {
+      knownCommands.add(cmd);
+    }
+  }
 
-  for (const cmd of customCmds) {
+  /**
+   * パイプで区切られた各セグメントのコマンドを追加するヘルパー
+   * - クォート（シングル・ダブル）内の | はシェルパイプではないためスキップ
+   * - パイプ後のセグメントは先頭トークン（コマンド名）のみ処理
+   */
+  function addCmdWithPipes(line) {
+    addCmd(line);
+    // クォート内のパイプを除外するため、クォートを除去してからパイプ分割
+    const stripped = line.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''");
+    const pipeSegments = stripped.split('|');
+    for (let i = 1; i < pipeSegments.length; i++) {
+      // パイプ後の先頭コマンドのみ（オプション引数はスキップ）
+      const pipeCmd = pipeSegments[i].trim().split(/\s/)[0];
+      addCmd(pipeCmd);
+    }
+  }
+
+  // --- 抽出元1: コードフェンスブロック（bash/sh/shell/zsh/console） ---
+  // インラインバッククォートは意図的にスキップ（用語囲みとコマンドを区別不可のため）
+  const fencePattern = /^```(?:bash|sh|shell|zsh|console)[^\n]*\n([\s\S]*?)^```/gm;
+  let fenceMatch;
+  while ((fenceMatch = fencePattern.exec(content)) !== null) {
+    const blockLines = fenceMatch[1].split('\n');
+    for (const line of blockLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      // 変数代入行・awk/sed スクリプト内の識別子行はスキップ
+      if (/^\w+=/.test(trimmed)) continue; // 変数代入行
+      addCmdWithPipes(trimmed);
+    }
+  }
+
+  // --- 抽出元2: コードブロック外の $ プレフィックス行（実行例）---
+  // コードフェンス内は上記で処理済みなので、フェンス外の行に限定
+  // 簡易的に「$ 」で始まる行をドキュメント内の実行例とみなす
+  const dollarLinePattern = /^\s*\$\s+([^\n]+)/gm;
+  let dollarMatch;
+  while ((dollarMatch = dollarLinePattern.exec(content)) !== null) {
+    addCmdWithPipes(dollarMatch[1]);
+  }
+
+  // --- 存在チェック ---
+  for (const cmd of knownCommands) {
     if (commandExists(cmd)) {
       addResult(name, 'cmd-ref', 'PASS', `コマンド「${cmd}」がPATHに存在`);
     } else {
