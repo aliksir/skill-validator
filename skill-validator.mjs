@@ -13,6 +13,8 @@
 //   --verbose          詳細出力
 //   --fix              自動修正可能な項目を修正（バックアップ付き）
 //   --dry-run          修正内容のプレビュー（実際には変更しない）
+//   --quiet            FAILのみ表示（WARNは件数サマリーのみ）
+//   --strict           frontmatter の WARN も表示する
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
 import { resolve, join, extname, basename, dirname } from 'path';
@@ -35,6 +37,8 @@ const updateCheck = hasFlag('--update-check');
 const verbose = hasFlag('--verbose');
 const fixMode = hasFlag('--fix');
 const dryRun = hasFlag('--dry-run');
+const quiet = hasFlag('--quiet');
+const strict = hasFlag('--strict');
 
 // --- --help ---
 if (hasFlag('--help') || hasFlag('-h')) {
@@ -51,6 +55,8 @@ Options:
   --update-check     Check for updates from source repositories
   --fix              Auto-fix fixable issues (with backup)
   --dry-run          Preview fixes without applying
+  --quiet            Show FAIL only (WARN count in summary)
+  --strict           Show frontmatter WARN entries
   --help, -h         Show this help message
 `);
   process.exit(0);
@@ -157,21 +163,32 @@ function checkSyntax(filePath) {
 }
 
 // --- チェック1: フロントマター検証 ---
+// strict=false の場合、WARNはカウントのみ（サマリーで件数を表示）
+let frontmatterWarnCount = 0;
+
+function addFrontmatterWarn(name, message) {
+  frontmatterWarnCount++;
+  if (strict) {
+    addResult(name, 'frontmatter', 'WARN', message);
+  }
+  // strict でない場合は内部カウントのみ（サマリーで件数表示）
+}
+
 function checkFrontmatter(name, content, filePath) {
   const fm = parseYamlFrontmatter(content);
   if (!fm) {
     // SKILL.md にフロントマターがなくても、最低限 name 行があればOK（古い形式）
     if (content.match(/^name:/m)) {
-      addResult(name, 'frontmatter', 'WARN', 'YAML フロントマター未使用（name: は存在）');
+      addFrontmatterWarn(name, 'YAML フロントマター未使用（name: は存在）');
     } else {
-      addResult(name, 'frontmatter', 'WARN', 'フロントマター（---...---）が見つかりません');
+      addFrontmatterWarn(name, 'フロントマター（---...---）が見つかりません');
     }
     return;
   }
   if (!fm.name) {
     addResult(name, 'frontmatter', 'FAIL', 'フロントマターに name がありません');
   } else if (fm.name !== name && fm.name !== basename(filePath, '.md')) {
-    addResult(name, 'frontmatter', 'WARN', `name が「${fm.name}」ですがディレクトリ名は「${name}」です`);
+    addFrontmatterWarn(name, `name が「${fm.name}」ですがディレクトリ名は「${name}」です`);
   } else {
     addResult(name, 'frontmatter', 'PASS', `name: ${fm.name}`);
   }
@@ -278,70 +295,102 @@ function checkToolReferences(name, content, filePath) {
 }
 
 // --- チェック4: コマンド参照検証 ---
+
+// コマンドとして誤検知しやすい単語・シェル組み込みの除外リスト
+// （ループ外に定数として定義してパフォーマンス最適化）
+const CMD_EXCLUDE = new Set([
+  // シェル組み込みコマンド・構文キーワード
+  'done', 'then', 'else', 'elif', 'esac', 'eval', 'exec',
+  'trap', 'wait', 'shift', 'alias', 'unset', 'declare', 'readonly',
+  'typeset', 'getopts', 'source', 'local',
+  // 英語の一般単語（4文字以上）
+  'also', 'each', 'here', 'into', 'just', 'like', 'make', 'many',
+  'most', 'much', 'must', 'name', 'need', 'only', 'over', 'such',
+  'take', 'than', 'that', 'them', 'then', 'this', 'very', 'when',
+  'will', 'with', 'your', 'about', 'after', 'being', 'could', 'every',
+  'first', 'found', 'great', 'never', 'other', 'right', 'shall',
+  'since', 'still', 'their', 'there', 'these', 'thing', 'those',
+  'under', 'using', 'where', 'which', 'while', 'would', 'should',
+  'before', 'between', 'during', 'allows', 'rather', 'string', 'number',
+  'object', 'header', 'module', 'result', 'output', 'input', 'value',
+  'default', 'example', 'defaults', 'decision', 'description', 'markdown',
+  'package', 'email', 'placeholder', 'flag', 'have', 'executes', 'based',
+  'above', 'below', 'inside', 'returns', 'given', 'called', 'ensure',
+  'create', 'check', 'update', 'delete', 'model', 'data', 'file', 'path',
+  'note', 'rule', 'test', 'step', 'list', 'item', 'code', 'line', 'mode',
+  'info', 'warn', 'error', 'pass', 'fail', 'skip', 'next', 'prev',
+  'start', 'stop', 'open', 'close', 'read', 'write', 'send', 'load',
+  'save', 'init', 'main', 'help', 'show', 'hide', 'move', 'copy', 'link',
+  'done', 'use', 'set', 'show',
+  // 誤検知報告済みの英単語
+  'markers', 'section', 'contains', 'accordingly', 'artifact', 'onwards',
+  'annotations', 'complete', 'agent', 'reached', 'folder', 'correctly',
+  'sections', 'parameter', 'http', 'tidy', 'system', 'ignore',
+  'forget', 'pretend', 'goto', 'click', 'fill', 'snapshot', 'screenshot',
+  'implement', 'search', 'exploit',
+  // 言語名（コマンドではない）
+  'csharp', 'rust', 'swift', 'kotlin', 'scala', 'elixir', 'dart',
+  'typescript', 'javascript', 'dockerfile', 'graphql',
+  // プログラミング用語
+  'true', 'false', 'null', 'none', 'text',
+  'config', 'import', 'export', 'const', 'function', 'return',
+  'class', 'async', 'await', 'from', 'type', 'interface', 'enum',
+  'void', 'self', 'super', 'static', 'public', 'private', 'protected',
+  'abstract', 'final', 'override', 'throw', 'catch', 'finally',
+  'break', 'continue', 'switch', 'case', 'yield', 'defer',
+  'struct', 'trait', 'impl', 'match', 'select', 'insert',
+  'define', 'include', 'require', 'template', 'component', 'service',
+  // CSS/HTMLプロパティ
+  'display', 'color', 'width', 'height', 'margin', 'padding', 'border',
+  'content', 'position', 'overflow', 'opacity', 'transition',
+  'prefers-reduced-motion', 'select_related', 'prefetch_related',
+  // フレームワーク/ライブラリ名
+  'react', 'angular', 'django', 'flask', 'express', 'spring',
+  // ペンテストスキル参照
+  'api-fuzzing-bug-bounty', 'scanning-tools', 'truststore', 'certifi',
+  // その他の偽陽性パターン
+  'agents', 'script', 'debug', 'format', 'build', 'deploy', 'lint',
+  'watch', 'clean', 'serve', 'print', 'parse', 'fetch', 'handle',
+  'render', 'mount', 'patch', 'merge', 'reset', 'clear', 'flush',
+  'index', 'count', 'query', 'table', 'field', 'column', 'schema',
+  'token', 'scope', 'state', 'event', 'route', 'proxy', 'cache',
+  'queue', 'stack', 'graph', 'tree', 'worker', 'socket',
+  'stream', 'buffer', 'chunk', 'block', 'layer', 'stage', 'phase',
+  'setup', 'apply', 'abort', 'retry', 'spawn', 'child', 'parent',
+  'local', 'remote', 'source', 'target', 'origin', 'branch', 'commit',
+  'version', 'release', 'stable', 'latest', 'canary', 'verify',
+  'delete', 'xml', 'svg', 'yaml', 'json', 'html', 'css', 'lua',
+  'sql', 'act', 'auto', 'submit', 'closes', 'links', 'review',
+  // ARIA属性（HTMLアクセシビリティ属性はコマンドではない）
+  'aria-expanded', 'aria-label', 'aria-controls', 'aria-selected',
+  'aria-hidden', 'aria-disabled', 'aria-describedby', 'aria-live',
+  'aria-checked', 'aria-pressed', 'aria-required', 'aria-invalid',
+  // 一般的な英単語（追加）
+  'status', 'report', 'enable', 'disable', 'remove', 'filter',
+  'change', 'access', 'button', 'press', 'place', 'enter', 'leave',
+  'valid', 'invalid', 'success', 'failure', 'install', 'uninstall',
+  'active', 'inactive', 'running', 'pending', 'failed', 'paused',
+  'request', 'response', 'message', 'payload', 'callback', 'handler',
+  'prefix', 'suffix', 'pattern', 'regex', 'match', 'replace',
+  'extract', 'convert', 'encode', 'decode', 'compress', 'decompress',
+  'expand', 'collapse', 'toggle', 'switch', 'navigate', 'redirect',
+  'upload', 'download', 'attach', 'detach', 'bind', 'unbind',
+  'register', 'unregister', 'connect', 'disconnect', 'subscribe',
+  'publish', 'emit', 'listen', 'notify', 'alert', 'confirm', 'prompt',
+]);
+
 function checkCommandReferences(name, content) {
   // バッククォート内のコマンドパターンを抽出
   const codeBlocks = content.match(/`([^`]+)`/g) || [];
   const knownCommands = new Set();
 
+  // 一般的なCLIコマンドやキーワードを除外（関数外で定義してループ内の再生成を避ける）
   for (const block of codeBlocks) {
     const cmd = block.replace(/`/g, '').trim().split(/\s/)[0];
-    // コマンドっぽいもの（小文字英字+ハイフンで始まる）
-    if (/^[a-z][\w-]*$/.test(cmd) && cmd.length > 2 && cmd.length < 30) {
-      // 一般的なCLIコマンドやキーワードを除外
-      const exclude = new Set([
-        // 英語の一般単語
-        'the', 'and', 'for', 'not', 'use', 'see', 'run', 'set', 'get', 'add',
-        'all', 'any', 'are', 'but', 'can', 'did', 'has', 'had', 'have', 'its',
-        'may', 'our', 'out', 'own', 'per', 'put', 'say', 'she', 'too', 'was',
-        'way', 'who', 'why', 'yes', 'yet', 'you', 'also', 'each', 'here',
-        'into', 'just', 'like', 'make', 'many', 'most', 'much', 'must', 'name',
-        'need', 'only', 'over', 'such', 'take', 'than', 'that', 'them', 'then',
-        'this', 'very', 'when', 'will', 'with', 'your', 'about', 'after',
-        'being', 'could', 'every', 'first', 'found', 'great', 'never', 'other',
-        'right', 'shall', 'since', 'still', 'their', 'there', 'these', 'thing',
-        'those', 'under', 'using', 'where', 'which', 'while', 'would', 'should',
-        'before', 'between', 'during', 'allows', 'rather', 'string', 'number',
-        'object', 'header', 'module', 'result', 'output', 'input', 'value',
-        'default', 'example', 'defaults', 'decision', 'description', 'markdown',
-        'package', 'email', 'placeholder', 'flag', 'have', 'executes', 'based',
-        'above', 'below', 'inside', 'returns', 'given', 'called', 'ensure',
-        'create', 'check', 'update', 'delete', 'model', 'data', 'file', 'path',
-        'note', 'rule', 'test', 'step', 'list', 'item', 'code', 'line', 'mode',
-        'info', 'warn', 'error', 'pass', 'fail', 'skip', 'done', 'next', 'prev',
-        'start', 'stop', 'open', 'close', 'read', 'write', 'send', 'load',
-        'save', 'init', 'main', 'help', 'show', 'hide', 'move', 'copy', 'link',
-        // プログラミング用語
-        'let', 'var', 'new', 'true', 'false', 'null', 'auto', 'none', 'text',
-        'ref', 'img', 'src', 'url', 'api', 'css', 'html', 'json', 'yaml',
-        'env', 'config', 'import', 'export', 'const', 'function', 'return',
-        'class', 'async', 'await', 'from', 'type', 'interface', 'enum',
-        'void', 'self', 'super', 'static', 'public', 'private', 'protected',
-        'abstract', 'final', 'override', 'throw', 'catch', 'finally', 'try',
-        'break', 'continue', 'switch', 'case', 'while', 'yield', 'defer',
-        'struct', 'trait', 'impl', 'match', 'where', 'select', 'insert',
-        'define', 'include', 'require', 'template', 'component', 'service',
-        // CSS/HTMLプロパティ
-        'display', 'color', 'width', 'height', 'margin', 'padding', 'border',
-        'content', 'position', 'overflow', 'opacity', 'transition',
-        'prefers-reduced-motion', 'select_related', 'prefetch_related',
-        // フレームワーク/ライブラリ名（コマンドではない）
-        'typescript', 'javascript', 'dockerfile', 'graphql', 'xml', 'svg',
-        'react', 'angular', 'django', 'flask', 'express', 'spring',
-        // ペンテストスキルの参照（スキル名はコマンドではない）
-        'api-fuzzing-bug-bounty', 'scanning-tools', 'dot',
-        // その他の偽陽性パターン
-        'agents', 'script', 'debug', 'format', 'build', 'deploy', 'lint',
-        'watch', 'clean', 'serve', 'print', 'parse', 'fetch', 'handle',
-        'render', 'mount', 'patch', 'merge', 'reset', 'clear', 'flush',
-        'index', 'count', 'query', 'table', 'field', 'column', 'schema',
-        'token', 'scope', 'state', 'event', 'route', 'proxy', 'cache',
-        'queue', 'stack', 'graph', 'tree', 'node-', 'worker', 'socket',
-        'stream', 'buffer', 'chunk', 'block', 'layer', 'stage', 'phase',
-        'setup', 'apply', 'abort', 'retry', 'spawn', 'child', 'parent',
-        'local', 'remote', 'source', 'target', 'origin', 'branch', 'commit',
-        'version', 'release', 'stable', 'latest', 'canary', 'verify',
-      ]);
-      if (!exclude.has(cmd)) {
+    // コマンドっぽいもの（小文字英字+ハイフンで始まる、4文字以上）
+    // 3文字以下は除外: aws/pip 等は systemCmds で個別カバー済み
+    if (/^[a-z][\w-]*$/.test(cmd) && cmd.length > 3 && cmd.length < 30) {
+      if (!CMD_EXCLUDE.has(cmd)) {
         knownCommands.add(cmd);
       }
     }
@@ -355,8 +404,11 @@ function checkCommandReferences(name, content) {
     const lines = block.split('\n').slice(1, -1);
     for (const line of lines) {
       const cmd = line.trim().replace(/^\$\s*/, '').split(/\s/)[0];
-      if (/^[a-z][\w-]+$/.test(cmd) && cmd.length > 2) {
-        knownCommands.add(cmd);
+      // シェルブロック内も4文字以上に統一（3文字以下は systemCmds でカバー）
+      if (/^[a-z][\w-]+$/.test(cmd) && cmd.length > 3) {
+        if (!CMD_EXCLUDE.has(cmd)) {
+          knownCommands.add(cmd);
+        }
       }
     }
   }
@@ -384,13 +436,33 @@ function checkCommandReferences(name, content) {
 
 // --- チェック5: パス参照検証 ---
 function checkPathReferences(name, content) {
+  const isWindows = process.platform === 'win32';
+
   // 絶対パス参照
-  const absPaths = content.match(/(?:C:[\\/]|\/(?:home|Users|usr|opt|etc)[\\/])[\w/.\\-]+/g);
+  const absPaths = content.match(/(?:C:[\\/]|\/(?:home|Users|usr|opt|etc|var)[\\/])[\w/.\\-]+/g);
   if (absPaths) {
     const unique = [...new Set(absPaths)].map(p => p.replace(/\\/g, '/'));
     for (const p of unique) {
-      // パスが実在するか確認（ただしサンプル/例文っぽいものは除外）
+      // サンプル/例文っぽいパスは除外
       if (p.includes('example') || p.includes('your-') || p.includes('username')) continue;
+
+      // OS固有パスのスキップ判定
+      const isLinuxPath = p.startsWith('/etc/') || p.startsWith('/usr/') ||
+                          p.startsWith('/home/') || p.startsWith('/opt/') ||
+                          p.startsWith('/var/');
+      const isWindowsPath = /^[A-Za-z]:[\\/]/.test(p);
+
+      if (isWindows && isLinuxPath) {
+        // Windows環境でLinuxパスは除外（セキュリティスキル教材パス等のノイズ解消）
+        if (verbose) addResult(name, 'path-ref', 'PASS', `他OS固有パスのためスキップ: ${p}`);
+        continue;
+      }
+      if (!isWindows && isWindowsPath) {
+        // Linux/macOS環境でWindowsパスは除外
+        if (verbose) addResult(name, 'path-ref', 'PASS', `他OS固有パスのためスキップ: ${p}`);
+        continue;
+      }
+
       if (existsSync(p)) {
         if (verbose) addResult(name, 'path-ref', 'PASS', `パス存在OK: ${p}`);
       } else {
@@ -609,14 +681,18 @@ function printResults() {
     totalWarn += warns.length;
     totalFail += fails.length;
 
-    // 問題がないスキルは非verboseでスキップ
-    if (!verbose && fails.length === 0 && warns.length === 0) continue;
-
     if (fails.length > 0) failedTargets.push(target);
+
+    // quiet モード: FAILがなければスキップ
+    if (quiet && fails.length === 0) continue;
+    // 通常モード: 問題がないスキルは非verboseでスキップ
+    if (!quiet && !verbose && fails.length === 0 && warns.length === 0) continue;
 
     console.log(`\n📦 ${target}`);
     for (const c of checks) {
       if (!verbose && c.status === 'PASS') continue;
+      // quiet モード: WARNは表示しない（サマリーのみ）
+      if (quiet && c.status === 'WARN') continue;
       console.log(`  ${statusIcon[c.status]} [${c.check}] ${c.message}`);
     }
   }
@@ -628,6 +704,16 @@ function printResults() {
   console.log(`  チェック総数: ${results.length}`);
   console.log(`  ✅ PASS: ${totalPass}  ⚠️ WARN: ${totalWarn}  ❌ FAIL: ${totalFail}`);
 
+  // frontmatter WARN の件数サマリー（--strict なしの場合）
+  if (!strict && frontmatterWarnCount > 0) {
+    console.log(`  ℹ️  frontmatter警告: ${frontmatterWarnCount}件（--strictで詳細表示）`);
+  }
+
+  // quiet モード: WARN件数のみサマリーに出す
+  if (quiet && totalWarn > 0) {
+    console.log(`  ℹ️  WARN: ${totalWarn}件（--quietのため詳細非表示）`);
+  }
+
   if (failedTargets.length > 0) {
     console.log(`\n  ❌ 要修正 (${failedTargets.length}件):`);
     for (const t of failedTargets) {
@@ -635,7 +721,7 @@ function printResults() {
     }
   }
 
-  if (totalFail === 0 && totalWarn === 0) {
+  if (totalFail === 0 && totalWarn === 0 && frontmatterWarnCount === 0) {
     console.log('\n  🎉 全スキル健全！問題は見つかりませんでした。');
   }
   console.log('');
