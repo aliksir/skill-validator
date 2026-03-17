@@ -17,9 +17,9 @@
 //   --strict           frontmatter の WARN も表示する
 
 import { readFileSync, readdirSync, existsSync, statSync } from 'fs';
-import { resolve, join, extname, basename, dirname } from 'path';
+import { resolve, join, extname, basename, dirname, relative } from 'path';
 import { execSync, execFileSync } from 'child_process';
-import { homedir } from 'os';
+import { homedir, tmpdir } from 'os';
 
 // --- CLI引数パース ---
 const args = process.argv.slice(2);
@@ -33,12 +33,15 @@ const claudeDir = (getArg('--dir') || join(homedir(), '.claude')).replace(/\\/g,
 const skillsOnly = hasFlag('--skills-only');
 const commandsOnly = hasFlag('--commands-only');
 const jsonOutput = hasFlag('--json');
-const updateCheck = hasFlag('--update-check');
+const updateMode = hasFlag('--update');
+const updateCheck = hasFlag('--update-check') || updateMode;
 const verbose = hasFlag('--verbose');
 const fixMode = hasFlag('--fix');
 const dryRun = hasFlag('--dry-run');
 const quiet = hasFlag('--quiet');
 const strict = hasFlag('--strict');
+const selfUpdateMode = hasFlag('--self-update');
+const noVersionCheck = hasFlag('--no-version-check');
 
 // --- --help ---
 if (hasFlag('--help') || hasFlag('-h')) {
@@ -47,19 +50,112 @@ if (hasFlag('--help') || hasFlag('-h')) {
 Usage: claude-skill-validator [options]
 
 Options:
-  --dir <path>       Claude config directory (default: ~/.claude)
-  --skills-only      Scan skills/ only
-  --commands-only    Scan commands/ only
-  --json             JSON output
-  --verbose          Show all checks (including PASS)
-  --update-check     Check for updates from source repositories
-  --fix              Auto-fix fixable issues (with backup)
-  --dry-run          Preview fixes without applying
-  --quiet            Show FAIL only (WARN count in summary)
-  --strict           Show frontmatter WARN entries
-  --help, -h         Show this help message
+  --dir <path>         Claude config directory (default: ~/.claude)
+  --skills-only        Scan skills/ only
+  --commands-only      Scan commands/ only
+  --json               JSON output
+  --verbose            Show all checks (including PASS)
+  --update-check       Check for updates from source repositories
+  --update             Apply available updates (implies --update-check)
+  --fix                Auto-fix fixable issues (with backup)
+  --dry-run            Preview fixes without applying
+  --quiet              Show FAIL only (WARN count in summary)
+  --strict             Show frontmatter WARN entries
+  --self-update        Update claude-skill-validator itself to the latest version
+  --no-version-check   Skip npm version check at end of scan
+  --help, -h           Show this help message
 `);
   process.exit(0);
+}
+
+// --- バージョン管理 ---
+
+import { fileURLToPath } from 'url';
+
+/** このスクリプトと同ディレクトリの package.json から現在バージョンを取得 */
+function getCurrentVersion() {
+  try {
+    const scriptDir = dirname(fileURLToPath(import.meta.url));
+    const pkgPath = join(scriptDir, 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      return pkg.version || null;
+    }
+  } catch {}
+  return null;
+}
+
+/** npmレジストリから最新バージョンを取得。失敗時は null を返す */
+function getLatestVersion() {
+  try {
+    return execSync('npm view claude-skill-validator version', {
+      encoding: 'utf-8',
+      timeout: 10000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+  } catch {
+    return null; // オフライン等
+  }
+}
+
+/**
+ * semver比較。current < latest なら true。
+ * major.minor.patch の数値比較のみ（外部依存なし）
+ */
+function isNewer(current, latest) {
+  const toNums = (v) => v.replace(/^v/, '').split('.').map(Number);
+  const [cM, cm, cp] = toNums(current);
+  const [lM, lm, lp] = toNums(latest);
+  if (lM !== cM) return lM > cM;
+  if (lm !== cm) return lm > cm;
+  return lp > cp;
+}
+
+/** npx 経由で実行されているかどうかを判定 */
+function isNpx() {
+  const execPath = process.env.npm_execpath || '';
+  const argv1 = process.argv[1] || '';
+  if (execPath.includes('npx') || argv1.includes('npx')) return true;
+  // npx はキャッシュ内 (_npx) に展開する
+  if (argv1.includes('_npx')) return true;
+  // グローバルインストール確認
+  try {
+    const out = execSync('npm list -g claude-skill-validator --depth=0', {
+      encoding: 'utf-8',
+      timeout: 5000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return !out.includes('claude-skill-validator');
+  } catch {
+    return false;
+  }
+}
+
+/** --self-update: npm install -g claude-skill-validator@latest を実行 */
+async function selfUpdate() {
+  if (isNpx()) {
+    console.log(`\nℹ️  npxでは自動更新できません。`);
+    console.log(`   npm install -g claude-skill-validator でインストール後に --self-update を使用してください。\n`);
+    process.exit(0);
+  }
+
+  const current = getCurrentVersion() || '(不明)';
+  console.log(`\n🔄 claude-skill-validator を更新中...`);
+  console.log(`  現在: v${current}`);
+  console.log(`  📥 npm install -g claude-skill-validator@latest`);
+
+  try {
+    execSync('npm install -g claude-skill-validator@latest', {
+      encoding: 'utf-8',
+      timeout: 60000,
+      stdio: 'inherit',
+    });
+    const after = getLatestVersion() || '(確認失敗)';
+    console.log(`  ✅ 更新完了: v${after}\n`);
+  } catch (e) {
+    console.error(`  ❌ 更新失敗: ${e.message}`);
+    process.exit(1);
+  }
 }
 
 // --- 結果収集 ---
@@ -75,7 +171,7 @@ function addFix(target, filePath, description, apply) {
 }
 
 // --- バックアップ & 修正 ---
-import { copyFileSync, writeFileSync, mkdirSync } from 'fs';
+import { copyFileSync, writeFileSync, mkdirSync, cpSync, rmSync } from 'fs';
 
 function backupFile(filePath) {
   const backupDir = join(claudeDir, '.skill-validator-backup');
@@ -85,6 +181,233 @@ function backupFile(filePath) {
   const backupPath = join(backupDir, backupName);
   copyFileSync(filePath, backupPath);
   return backupPath;
+}
+
+/** スキルディレクトリ全体をバックアップ */
+function backupSkillDir(skillDir, skillName) {
+  const backupBaseDir = join(claudeDir, '.skill-validator-backup');
+  mkdirSync(backupBaseDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.Z]/g, '').slice(0, 15);
+  const backupName = `${skillName}-${timestamp}`;
+  const backupPath = join(backupBaseDir, backupName);
+  cpSync(skillDir, backupPath, { recursive: true });
+  return backupName;
+}
+
+// --- アップデート適用 ---
+
+/**
+ * checkUpdates() と同じロジックでソース情報を取得して返す
+ * @returns {{ sourceUrl, owner, repo, localSha, isGit }} または null
+ */
+function resolveSkillSource(baseDir) {
+  const sourceFile = join(baseDir, '.source');
+  let sourceUrl = null;
+
+  if (existsSync(sourceFile)) {
+    sourceUrl = readFileSync(sourceFile, 'utf-8').trim();
+  }
+
+  const pkgPath = join(baseDir, 'package.json');
+  if (!sourceUrl && existsSync(pkgPath)) {
+    try {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      if (pkg.repository?.url) sourceUrl = pkg.repository.url;
+      else if (typeof pkg.repository === 'string') sourceUrl = pkg.repository;
+    } catch {}
+  }
+
+  const gitDir = join(baseDir, '.git');
+  const isGit = existsSync(gitDir);
+
+  if (!sourceUrl && isGit) {
+    try {
+      sourceUrl = execSync(`git -C "${baseDir}" remote get-url origin`, {
+        encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch {}
+  }
+
+  if (!sourceUrl) return null;
+
+  const ghMatch = sourceUrl.match(/github\.com[/:]([^/]+)\/([^/.]+)/);
+  if (!ghMatch) return { sourceUrl, owner: null, repo: null, localSha: null, isGit };
+
+  const [, owner, repo] = ghMatch;
+
+  // ローカルSHAを取得
+  let localSha = null;
+  if (isGit) {
+    try {
+      localSha = execSync(`git -C "${baseDir}" rev-parse HEAD`, {
+        encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+    } catch {}
+  }
+  const shaFile = join(baseDir, '.source-sha');
+  if (!localSha && existsSync(shaFile)) {
+    localSha = readFileSync(shaFile, 'utf-8').trim();
+  }
+
+  return { sourceUrl, owner, repo, localSha, isGit };
+}
+
+async function applyUpdates() {
+  const skillsDir = join(claudeDir, 'skills');
+  if (!existsSync(skillsDir)) {
+    console.error(`skills/ が見つかりません: ${skillsDir}`);
+    return;
+  }
+
+  const entries = readdirSync(skillsDir).filter(e => {
+    const full = join(skillsDir, e);
+    return statSync(full).isDirectory() && !e.startsWith('_') && e !== 'security';
+  });
+
+  if (dryRun) {
+    console.log('\n🔍 [dry-run] アップデート確認中（変更は行いません）...\n');
+  } else {
+    console.log('\n🔄 アップデート実行中...\n');
+  }
+
+  let updatedCount = 0;
+  let skippedCount = 0;
+  let errorCount = 0;
+
+  for (const name of entries) {
+    const baseDir = join(skillsDir, name);
+    console.log(`📦 ${name}`);
+
+    // ソース情報なしはスキップ
+    const src = resolveSkillSource(baseDir);
+    if (!src) {
+      console.log(`  ⏭️  ソース情報なし — スキップ`);
+      skippedCount++;
+      continue;
+    }
+
+    if (!src.owner) {
+      console.log(`  ⏭️  GitHub以外のソース (${src.sourceUrl}) — スキップ`);
+      skippedCount++;
+      continue;
+    }
+
+    const { owner, repo, localSha, isGit } = src;
+
+    // リモートSHAを取得
+    let remoteSha;
+    try {
+      remoteSha = execSync(
+        `gh api repos/${owner}/${repo}/commits/HEAD --jq '.sha'`,
+        { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] }
+      ).trim();
+    } catch (e) {
+      console.log(`  ❌ リモートSHA取得失敗: ${e.message?.slice(0, 80)}`);
+      errorCount++;
+      continue;
+    }
+
+    // SHAが一致していれば最新
+    if (localSha && localSha === remoteSha) {
+      console.log(`  ✅ 最新版 (${remoteSha.slice(0, 7)}) — スキップ`);
+      skippedCount++;
+      continue;
+    }
+
+    const localLabel = localSha ? localSha.slice(0, 7) : '不明';
+    const remoteLabel = remoteSha.slice(0, 7);
+    console.log(`  📥 ${owner}/${repo} (${localLabel} → ${remoteLabel})`);
+
+    if (dryRun) {
+      console.log(`  → [dry-run] 変更なし`);
+      updatedCount++;
+      continue;
+    }
+
+    // --- 実際のアップデート適用 ---
+    let backupName;
+    try {
+      backupName = backupSkillDir(baseDir, name);
+      console.log(`  💾 バックアップ完了: ${backupName}/`);
+    } catch (e) {
+      console.log(`  ❌ バックアップ失敗: ${e.message}`);
+      errorCount++;
+      continue;
+    }
+
+    try {
+      if (isGit) {
+        // git clone版: git pull で更新
+        execSync(`git -C "${baseDir}" pull --ff-only`, {
+          encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } else {
+        // tarball版: gh api でtarballダウンロード → 展開 → 上書き
+        const tmpBase = join(tmpdir(), `skill-update-${name}-${Date.now()}`);
+        mkdirSync(tmpBase, { recursive: true });
+
+        try {
+          const tarPath = join(tmpBase, `${name}.tar.gz`);
+
+          // gh api でtarballをダウンロード
+          execSync(
+            `gh api repos/${owner}/${repo}/tarball -H "Accept: application/vnd.github+json" --output "${tarPath}"`,
+            { encoding: 'utf-8', timeout: 60000, stdio: ['pipe', 'pipe', 'pipe'] }
+          );
+
+          const extractDir = join(tmpBase, 'extracted');
+          mkdirSync(extractDir, { recursive: true });
+
+          // tar で展開
+          execSync(`tar -xzf "${tarPath}" -C "${extractDir}" --strip-components=1`, {
+            encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'],
+          });
+
+          // 既存ディレクトリの内容を新版で上書き（.git は保護）
+          // まず既存の管理外ファイルを削除（.gitは除く）
+          const existingFiles = readdirSync(baseDir);
+          for (const f of existingFiles) {
+            if (f === '.git') continue;
+            const fp = join(baseDir, f);
+            try {
+              rmSync(fp, { recursive: true, force: true });
+            } catch {}
+          }
+
+          // 新版のファイルをコピー
+          const newFiles = readdirSync(extractDir);
+          for (const f of newFiles) {
+            const src2 = join(extractDir, f);
+            const dst = join(baseDir, f);
+            cpSync(src2, dst, { recursive: true });
+          }
+        } finally {
+          // 一時ディレクトリを削除
+          try {
+            rmSync(tmpBase, { recursive: true, force: true });
+          } catch {}
+        }
+
+        // .source-sha を新SHAで更新
+        const shaFile = join(baseDir, '.source-sha');
+        writeFileSync(shaFile, remoteSha, 'utf-8');
+      }
+
+      console.log(`  ✅ アップデート完了（バックアップ: ${backupName}/）`);
+      updatedCount++;
+    } catch (e) {
+      console.log(`  ❌ アップデート失敗: ${e.message?.slice(0, 120)}`);
+      console.log(`  ↩️  ロールバック: ${join(claudeDir, '.skill-validator-backup', backupName)}/ を ${baseDir}/ にコピーしてください`);
+      errorCount++;
+    }
+  }
+
+  // サマリー
+  const label = dryRun ? '[dry-run] ' : '';
+  console.log(`\n🔄 ${label}アップデート結果: ${updatedCount}件更新、${skippedCount}件スキップ${errorCount > 0 ? `、${errorCount}件エラー` : ''}`);
+  if (!dryRun && updatedCount > 0) {
+    console.log(`  バックアップ先: ${join(claudeDir, '.skill-validator-backup')}/`);
+  }
 }
 
 function applyFixes() {
@@ -724,12 +1047,37 @@ function printResults() {
   if (totalFail === 0 && totalWarn === 0 && frontmatterWarnCount === 0) {
     console.log('\n  🎉 全スキル健全！問題は見つかりませんでした。');
   }
+
+  // npmバージョンチェック（--no-version-check / --json / --quiet では非表示）
+  if (!noVersionCheck && !jsonOutput) {
+    const current = getCurrentVersion();
+    if (current) {
+      const latest = getLatestVersion();
+      if (latest && isNewer(current, latest)) {
+        console.log(`\n  💡 新バージョン v${latest} が利用可能です（現在 v${current}）`);
+        console.log(`     更新: npm install -g claude-skill-validator@latest`);
+      }
+    }
+  }
+
   console.log('');
 }
 
 // --- メイン ---
 
 async function main() {
+  // --self-update: ツール自身を更新して終了
+  if (selfUpdateMode) {
+    await selfUpdate();
+    return;
+  }
+
+  // --update のみの場合はスキャンをスキップしてアップデートのみ実行
+  if (updateMode && skillsOnly) {
+    await applyUpdates();
+    return;
+  }
+
   if (!commandsOnly) await scanSkills();
   if (!skillsOnly) scanCommands();
   printResults();
@@ -737,6 +1085,11 @@ async function main() {
   // 修正モード
   if (fixMode || dryRun) {
     applyFixes();
+  }
+
+  // アップデート適用モード（--update）
+  if (updateMode) {
+    await applyUpdates();
   }
 
   // 終了コード: FAILがあれば1
