@@ -10,19 +10,19 @@ description: Auto-fix repairable issues in installed Claude Code skills
 
 ### ステップ1: 修正プレビュー（ドライラン）
 ```
-node ${CLAUDE_PLUGIN_ROOT}/skill-validator.mjs --dry-run
+node ${CLAUDE_PLUGIN_ROOT}/skill-validator.js --dry-run
 ```
 修正内容を確認し、意図しない変更がないかチェックする。
 
 ### ステップ2: 自動修復を実行
 ```
-node ${CLAUDE_PLUGIN_ROOT}/skill-validator.mjs --fix
+node ${CLAUDE_PLUGIN_ROOT}/skill-validator.js --fix
 ```
 自動修正可能な項目（壊れた参照・非推奨ツール・構文エラー等）を修復する。
 
 ### ステップ3: 修復結果の確認
 ```
-node ${CLAUDE_PLUGIN_ROOT}/skill-validator.mjs
+node ${CLAUDE_PLUGIN_ROOT}/skill-validator.js
 ```
 修復後に再チェックして全件PASSであることを確認する。
 

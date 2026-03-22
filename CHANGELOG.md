@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.0] - 2026-03-22
+
+### Added
+- Test suite `test/skill-validator.test.mjs` using `node:test` + `node:assert/strict` (15 tests, zero external dependencies)
+  - Covers: `--help`, `-h`, `--json` schema contract, `--skills-only`, `--commands-only`, `--dir` missing path, `--verbose`, `--quiet`, `--dry-run`, `--no-version-check`, frontmatter validation, syntax error detection
+- `commands/` directory now included in npm package (`files` array updated)
+
+### Changed
+- Main script renamed from `skill-validator.mjs` to `skill-validator.js` — fixes silent bin deletion on `npm install -g` caused by npm ignoring `.mjs` bin entries; `"type": "module"` in `package.json` ensures ESM semantics are preserved
+- `bin` entry updated to `skill-validator.js`
+- `scripts.test` added: `node --test test/skill-validator.test.mjs`
+- CI workflow updated: syntax check now targets `skill-validator.js`; test step added
+- CHANGELOG: merged duplicate `[1.2.0]` entries (Added + Changed sections combined)
+
 ## [1.2.0] - 2026-03-17
 
 ### Added
@@ -19,8 +33,6 @@ All notable changes to this project will be documented in this file.
 - `isNewer(current, latest)`: Semver comparison (major.minor.patch numeric) with no external dependencies
 - `isNpx()`: Detects npx execution via `npm_execpath`, `argv[1]`, and `npm list -g` fallback
 - `selfUpdate()`: Orchestrates the self-update flow with pre/post version display
-
-## [1.2.0] - 2026-03-17
 
 ### Changed
 - `checkCommandReferences`: チェック対象をコードフェンスブロック（` ```bash/sh/shell/zsh/console ``` `）内のコマンドと `$ ` プレフィックス行のみに限定
