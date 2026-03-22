@@ -1,0 +1,13 @@
+{
+  "name": "skill-validator",
+  "version": "1.2.0",
+  "description": "Validate and repair Claude Code skills — detect broken references, deprecated tools, syntax errors, and auto-fix issues",
+  "author": {
+    "name": "aliks",
+    "url": "https://github.com/aliksir"
+  },
+  "homepage": "https://github.com/aliksir/skill-validator",
+  "repository": "https://github.com/aliksir/skill-validator",
+  "license": "MIT",
+  "keywords": ["skills", "validation", "repair", "health-check", "claude-code"]
+}
