@@ -86,10 +86,31 @@ claude-skill-validator --dry-run
 | `--skills-only` | Scan `skills/` directory only |
 | `--commands-only` | Scan `commands/` directory only |
 | `--json` | Output results as JSON |
+| `--verbose` | Show all checks including PASS |
+| `--quiet` | Show FAIL only; WARN count appears in summary |
+| `--strict` | Show frontmatter WARN entries (hidden by default) |
 | `--update-check` | Check for updates from source repositories |
-| `--verbose` | Verbose output |
+| `--update` | Apply available updates (implies `--update-check`) |
 | `--fix` | Auto-fix fixable issues (creates backups) |
 | `--dry-run` | Preview fixes without applying changes |
+| `--self-update` | Update `claude-skill-validator` itself to the latest version |
+| `--no-version-check` | Skip npm version check (useful in CI) |
+| `--help`, `-h` | Show help message |
+
+## Plugin Commands (`commands/`)
+
+This package ships two Claude Code slash commands in `commands/`:
+
+| Command | File | What it does |
+|---------|------|-------------|
+| `/skill-validate` | `commands/skill-validate.md` | Run a full scan (all options exposed) |
+| `/skill-validate-fix` | `commands/skill-validate-fix.md` | Guided dry-run → fix → verify flow |
+
+Install the package globally and the commands become available in Claude Code immediately:
+
+```bash
+npm install -g claude-skill-validator
+```
 
 ## Exit Codes
 

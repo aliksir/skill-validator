@@ -15,4 +15,6 @@ jobs:
         with:
           node-version: '20'
       - name: Syntax check
-        run: node --check *.mjs
+        run: node --check skill-validator.js
+      - name: Run tests
+        run: node --test test/skill-validator.test.mjs

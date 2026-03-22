@@ -28,22 +28,28 @@ npx claude-skill-validator
 claude-skill-validator
 
 # 詳細出力
-node skill-validator.mjs --verbose
+claude-skill-validator --verbose
 
 # アップデートチェック付き
-node skill-validator.mjs --update-check
+claude-skill-validator --update-check
 
 # JSON出力
-node skill-validator.mjs --json
+claude-skill-validator --json
 
 # skills/ のみ
-node skill-validator.mjs --skills-only
+claude-skill-validator --skills-only
 
 # commands/ のみ
-node skill-validator.mjs --commands-only
+claude-skill-validator --commands-only
 
 # 別ディレクトリを指定
-node skill-validator.mjs --dir /path/to/.claude
+claude-skill-validator --dir /path/to/.claude
+
+# FAILのみ表示
+claude-skill-validator --quiet
+
+# WARNも含めて厳密チェック
+claude-skill-validator --strict
 ```
 
 ## 出力例
@@ -92,6 +98,40 @@ claude-skill-validator --dry-run
 1. `.source` ファイル（GitHubリポジトリURL）
 2. `package.json` の `repository` フィールド
 3. `.git/` ディレクトリの `origin` リモート
+
+## オプション一覧
+
+| オプション | 説明 |
+|-----------|------|
+| `--dir <path>` | Claude設定ディレクトリ（デフォルト: `~/.claude`） |
+| `--skills-only` | `skills/` のみスキャン |
+| `--commands-only` | `commands/` のみスキャン |
+| `--json` | JSON形式で出力 |
+| `--verbose` | PASS含む全結果を表示 |
+| `--quiet` | FAILのみ表示（WARN件数はサマリーのみ） |
+| `--strict` | frontmatter WARNも表示（デフォルト非表示） |
+| `--update-check` | ソースリポジトリからのアップデートチェック |
+| `--update` | アップデートを適用（`--update-check` を含む） |
+| `--fix` | 修正可能な問題を自動修復（バックアップ付き） |
+| `--dry-run` | 修正内容のプレビュー（実際には変更しない） |
+| `--self-update` | `claude-skill-validator` 自体を最新版に更新 |
+| `--no-version-check` | npm バージョンチェックをスキップ（CI環境向け） |
+| `--help`, `-h` | ヘルプを表示 |
+
+## プラグインコマンド（`commands/`）
+
+このパッケージには Claude Code スラッシュコマンドが同梱されています：
+
+| コマンド | ファイル | 機能 |
+|---------|---------|------|
+| `/skill-validate` | `commands/skill-validate.md` | 全オプション対応の一括スキャン |
+| `/skill-validate-fix` | `commands/skill-validate-fix.md` | dry-run → fix → 確認の3ステップフロー |
+
+グローバルインストール後、Claude Code でそのまま使えます：
+
+```bash
+npm install -g claude-skill-validator
+```
 
 ## 動作環境
 
