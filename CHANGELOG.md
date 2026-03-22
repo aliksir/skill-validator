@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.3.1] - 2026-03-22
+
+### Fixed
+- `bin` entry stripped during `npm publish` due to `./` prefix in bin path. Removed `./` prefix (`"./skill-validator.js"` → `"skill-validator.js"`)
+
 ## [1.3.0] - 2026-03-22
 
 ### Added
