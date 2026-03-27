@@ -81,7 +81,7 @@ function getCurrentVersion() {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       return pkg.version || null;
     }
-  } catch {}
+  } catch { /* package.json の読み込み・パース失敗は無視 */ }
   return null;
 }
 
@@ -126,9 +126,8 @@ function isNpx() {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return !out.includes('claude-skill-validator');
-  } catch {
-    return false;
-  }
+  } catch { /* npm list 失敗時はnpx経由ではないと仮定 */ }
+  return false;
 }
 
 /** --self-update: npm install -g claude-skill-validator@latest を実行 */
@@ -214,7 +213,7 @@ function resolveSkillSource(baseDir) {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       if (pkg.repository?.url) sourceUrl = pkg.repository.url;
       else if (typeof pkg.repository === 'string') sourceUrl = pkg.repository;
-    } catch {}
+    } catch { /* package.json のパース失敗は無視 */ }
   }
 
   const gitDir = join(baseDir, '.git');
@@ -222,10 +221,10 @@ function resolveSkillSource(baseDir) {
 
   if (!sourceUrl && isGit) {
     try {
-      sourceUrl = execSync(`git -C "${baseDir}" remote get-url origin`, {
+      sourceUrl = execFileSync('git', ['-C', baseDir, 'remote', 'get-url', 'origin'], {
         encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
-    } catch {}
+    } catch { /* リモートURL取得失敗（リモートなし等）は無視 */ }
   }
 
   if (!sourceUrl) return null;
@@ -239,10 +238,10 @@ function resolveSkillSource(baseDir) {
   let localSha = null;
   if (isGit) {
     try {
-      localSha = execSync(`git -C "${baseDir}" rev-parse HEAD`, {
+      localSha = execFileSync('git', ['-C', baseDir, 'rev-parse', 'HEAD'], {
         encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
-    } catch {}
+    } catch { /* HEAD SHA取得失敗（空リポジトリ等）は無視 */ }
   }
   const shaFile = join(baseDir, '.source-sha');
   if (!localSha && existsSync(shaFile)) {
@@ -338,7 +337,7 @@ async function applyUpdates() {
     try {
       if (isGit) {
         // git clone版: git pull で更新
-        execSync(`git -C "${baseDir}" pull --ff-only`, {
+        execFileSync('git', ['-C', baseDir, 'pull', '--ff-only'], {
           encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'],
         });
       } else {
@@ -371,7 +370,7 @@ async function applyUpdates() {
             const fp = join(baseDir, f);
             try {
               rmSync(fp, { recursive: true, force: true });
-            } catch {}
+            } catch { /* ファイル削除失敗は無視して続行 */ }
           }
 
           // 新版のファイルをコピー
@@ -385,7 +384,7 @@ async function applyUpdates() {
           // 一時ディレクトリを削除
           try {
             rmSync(tmpBase, { recursive: true, force: true });
-          } catch {}
+          } catch { /* 一時ディレクトリの削除失敗は無視 */ }
         }
 
         // .source-sha を新SHAで更新
@@ -534,44 +533,23 @@ function checkFileReferences(name, content, baseDir) {
     }
   }
 
-  // scripts/ 参照チェック
-  const scriptRefs = content.match(/scripts\/[\w.-]+/g);
-  if (scriptRefs) {
-    const unique = [...new Set(scriptRefs)];
-    for (const ref of unique) {
-      const scriptPath = join(baseDir, ref);
-      if (existsSync(scriptPath)) {
-        addResult(name, 'file-ref', 'PASS', `${ref} 存在確認OK`);
-      } else {
-        addResult(name, 'file-ref', 'FAIL', `${ref} を参照していますが存在しません`);
-      }
-    }
-  }
+  // パターン別ディレクトリ参照チェック
+  const dirPatterns = [
+    { pattern: /scripts\/[\w.-]+/g,    status: 'FAIL' },
+    { pattern: /references\/[\w.-]+/g, status: 'FAIL' },
+    { pattern: /resources\/[\w.-]+/g,  status: 'WARN' },
+  ];
 
-  // references/ 参照チェック
-  const refRefs = content.match(/references\/[\w.-]+/g);
-  if (refRefs) {
-    const unique = [...new Set(refRefs)];
+  for (const { pattern, status } of dirPatterns) {
+    const matches = content.match(pattern);
+    if (!matches) continue;
+    const unique = [...new Set(matches)];
     for (const ref of unique) {
       const refPath = join(baseDir, ref);
       if (existsSync(refPath)) {
         addResult(name, 'file-ref', 'PASS', `${ref} 存在確認OK`);
       } else {
-        addResult(name, 'file-ref', 'FAIL', `${ref} を参照していますが存在しません`);
-      }
-    }
-  }
-
-  // resources/ 参照チェック
-  const resRefs = content.match(/resources\/[\w.-]+/g);
-  if (resRefs) {
-    const unique = [...new Set(resRefs)];
-    for (const ref of unique) {
-      const resPath = join(baseDir, ref);
-      if (existsSync(resPath)) {
-        addResult(name, 'file-ref', 'PASS', `${ref} 存在確認OK`);
-      } else {
-        addResult(name, 'file-ref', 'WARN', `${ref} を参照していますが存在しません`);
+        addResult(name, 'file-ref', status, `${ref} を参照していますが存在しません`);
       }
     }
   }
@@ -799,17 +777,17 @@ async function checkUpdates(name, baseDir) {
       const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
       if (pkg.repository?.url) sourceUrl = pkg.repository.url;
       else if (typeof pkg.repository === 'string') sourceUrl = pkg.repository;
-    } catch {}
+    } catch { /* package.json のパース失敗は無視 */ }
   }
 
   // .git ディレクトリがあれば remote を確認
   const gitDir = join(baseDir, '.git');
   if (!sourceUrl && existsSync(gitDir)) {
     try {
-      sourceUrl = execSync(`git -C "${baseDir}" remote get-url origin`, {
+      sourceUrl = execFileSync('git', ['-C', baseDir, 'remote', 'get-url', 'origin'], {
         encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
       }).trim();
-    } catch {}
+    } catch { /* リモートURL取得失敗（リモートなし等）は無視 */ }
   }
 
   if (!sourceUrl) {
@@ -836,10 +814,10 @@ async function checkUpdates(name, baseDir) {
     let localSha = null;
     if (existsSync(gitDir)) {
       try {
-        localSha = execSync(`git -C "${baseDir}" rev-parse HEAD`, {
+        localSha = execFileSync('git', ['-C', baseDir, 'rev-parse', 'HEAD'], {
           encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
         }).trim();
-      } catch {}
+      } catch { /* HEAD SHA取得失敗（空リポジトリ等）は無視 */ }
     }
 
     // .source-sha ファイルで管理している場合
